@@ -38,4 +38,37 @@ describe("Claude adapter", () => {
     const empty = await claudeAdapter.read(testContext(path.join(cwd, "missing"), homeDir));
     expect(empty.components).toEqual([]);
   });
+
+  it("parses nested Claude hook handlers", async () => {
+    const { cwd, homeDir } = await makeTempProject();
+    await fs.ensureDir(path.join(cwd, ".claude"));
+    await fs.writeJson(path.join(cwd, ".claude", "settings.json"), {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [
+              {
+                type: "command",
+                command: "echo ghp_not-a-real-token-for-testing-1234567",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const setup = await claudeAdapter.read(testContext(cwd, homeDir));
+    const hook = setup.components.find((item) => item.kind === "hook");
+    expect(hook).toEqual(
+      expect.objectContaining({
+        event: "PreToolUse",
+        command: "echo ghp_not-a-real-token-for-testing-1234567",
+        risk: "high",
+      })
+    );
+    expect(setup.warnings.some((warning) => warning.includes("GitHub classic token"))).toBe(
+      true
+    );
+  });
 });

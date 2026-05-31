@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assessHookRisk,
   assessMcpServerRisk,
+  hasBroadFilesystemPath,
   isPermissionExpansion,
   shouldBlockMemoryCopy,
 } from "../src/core/safety.js";
@@ -42,6 +43,16 @@ describe("safety", () => {
     };
 
     expect(assessMcpServerRisk(server)).toBe("high");
+  });
+
+  it("detects sensitive filesystem subpaths", () => {
+    expect(hasBroadFilesystemPath("mcp-filesystem ~/.ssh")).toBe(true);
+    expect(hasBroadFilesystemPath("mcp-filesystem /Users/nf/.ssh")).toBe(true);
+    expect(hasBroadFilesystemPath("mcp-filesystem /home/dev/.config")).toBe(true);
+    expect(hasBroadFilesystemPath("mcp-filesystem /etc")).toBe(true);
+    expect(hasBroadFilesystemPath("mcp-filesystem --root=/etc")).toBe(true);
+    expect(hasBroadFilesystemPath("mcp-filesystem --allowed-dir=/Users/nf")).toBe(true);
+    expect(hasBroadFilesystemPath("mcp-filesystem relative/project")).toBe(false);
   });
 
   it("detects permission expansion and blocks personal memories by default", () => {

@@ -68,7 +68,11 @@ export async function writeTextWithBackup(
   let backup: string | undefined;
 
   if (await fs.pathExists(filePath)) {
-    backup = backupPath(filePath);
+    const stat = await fs.lstat(filePath);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Refusing to write through symlink: ${filePath}`);
+    }
+    backup = await uniqueBackupPath(filePath);
     await fs.copy(filePath, backup, { overwrite: false });
   }
 
@@ -91,9 +95,24 @@ export function backupPath(filePath: string, date = new Date()): string {
     pad(date.getHours()),
     pad(date.getMinutes()),
     pad(date.getSeconds()),
+    date.getMilliseconds().toString().padStart(3, "0"),
   ].join("");
 
   return `${filePath}.agent-port-backup-${timestamp}`;
+}
+
+async function uniqueBackupPath(filePath: string): Promise<string> {
+  const base = backupPath(filePath);
+  if (!(await fs.pathExists(base))) {
+    return base;
+  }
+
+  for (let index = 1; ; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!(await fs.pathExists(candidate))) {
+      return candidate;
+    }
+  }
 }
 
 export async function listExistingPaths(paths: string[]): Promise<string[]> {

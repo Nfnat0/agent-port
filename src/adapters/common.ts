@@ -418,30 +418,44 @@ export function hooksFromConfig(
 ): CanonicalSetupComponent[] {
   const hooks = objectValue(config.hooks);
   return Object.entries(hooks).flatMap(([event, value]) => {
-    const entries = Array.isArray(value) ? value : [value];
-    return entries.map((entry, index) => {
-      const hook = objectValue(entry);
-      const command =
-        stringValue(hook.command ?? hook.cmd) ??
-        (typeof entry === "string" ? entry : undefined);
-      const component = {
-        ...baseComponent(
-          agent,
-          "hook",
-          `${event}${entries.length > 1 ? ` ${index + 1}` : ""}`,
-          filePath,
-          context,
-          "manual",
-          "high"
-        ),
-        name: `${event}${entries.length > 1 ? `-${index + 1}` : ""}`,
-        event,
-        command,
-        args: stringArray(hook.args),
-        content: typeof entry === "string" ? entry : undefined,
-        raw: entry,
-      };
-      return { ...component, risk: assessHookRisk(component) };
+    const groups = Array.isArray(value) ? value : [value];
+    return groups.flatMap((groupEntry, groupIndex) => {
+      const group = objectValue(groupEntry);
+      const handlers = Array.isArray(group.hooks) ? group.hooks : [groupEntry];
+      return handlers.map((handlerEntry, handlerIndex) => {
+        const hook = objectValue(handlerEntry);
+        const command =
+          stringValue(hook.command ?? hook.cmd) ??
+          (typeof handlerEntry === "string" ? handlerEntry : undefined);
+        const suffixParts = [
+          ...(groups.length > 1 ? [groupIndex + 1] : []),
+          ...(handlers.length > 1 ? [handlerIndex + 1] : []),
+        ];
+        const suffix = suffixParts.length ? `-${suffixParts.join("-")}` : "";
+        const titleSuffix = suffixParts.length ? ` ${suffixParts.join(".")}` : "";
+        const raw =
+          Array.isArray(group.hooks) && typeof groupEntry === "object"
+            ? { ...group, hooks: [handlerEntry] }
+            : handlerEntry;
+        const component = {
+          ...baseComponent(
+            agent,
+            "hook",
+            `${event}${titleSuffix}`,
+            filePath,
+            context,
+            "manual",
+            "high"
+          ),
+          name: `${event}${suffix}`,
+          event,
+          command,
+          args: stringArray(hook.args),
+          content: typeof handlerEntry === "string" ? handlerEntry : undefined,
+          raw,
+        };
+        return { ...component, risk: assessHookRisk(component) };
+      });
     });
   });
 }

@@ -1,8 +1,9 @@
 import os from "node:os";
+import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import fs from "fs-extra";
-import type { AgentId, AdapterContext, PortPlan } from "../core/model.js";
+import type { AgentId, AdapterContext, PortPlan, SetupComponentKind } from "../core/model.js";
 import { DEFAULT_CATEGORIES } from "../core/model.js";
 import { isAgentId } from "../adapters/index.js";
 import { writeTextWithBackup } from "../core/fs.js";
@@ -13,13 +14,15 @@ export function createCliContext(options: {
   yes?: boolean;
   generatedDir?: string;
 }): AdapterContext {
+  const cwd = process.cwd();
+  const config = readProjectConfig(cwd);
   return {
-    cwd: process.cwd(),
+    cwd,
     homeDir: os.homedir(),
     dryRun: options.dryRun ?? true,
     yes: options.yes ?? false,
-    generatedDir: options.generatedDir ?? ".agent-port/generated",
-    categories: [...DEFAULT_CATEGORIES],
+    generatedDir: options.generatedDir ?? stringValue(config.generatedDir) ?? ".agent-port/generated",
+    categories: categoryValues(config.portCategories) ?? [...DEFAULT_CATEGORIES],
   };
 }
 
@@ -76,4 +79,50 @@ export async function readPlanFile(filePath: string): Promise<PortPlan> {
 
 export function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function readProjectConfig(cwd: string): Record<string, unknown> {
+  const filePath = path.join(cwd, "agent-port.config.json");
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+  const value = fs.readJsonSync(filePath) as unknown;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function categoryValues(value: unknown): SetupComponentKind[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const allowed = new Set<string>(DEFAULT_CATEGORIES);
+  const categories = value
+    .map((item) => (typeof item === "string" ? normalizeCategory(item) : undefined))
+    .filter((item): item is SetupComponentKind => !!item && allowed.has(item));
+  return categories.length > 0 ? categories : undefined;
+}
+
+function normalizeCategory(value: string): SetupComponentKind | undefined {
+  const aliases: Record<string, SetupComponentKind> = {
+    instructions: "instruction",
+    rules: "rule",
+    memories: "memory",
+    skills: "skill",
+    customAgents: "custom-agent",
+    commands: "command",
+    hooks: "hook",
+    mcpServers: "mcp-server",
+    permissions: "permission",
+    envReferences: "env-reference",
+  };
+  if ((DEFAULT_CATEGORIES as readonly string[]).includes(value)) {
+    return value as SetupComponentKind;
+  }
+  return aliases[value];
 }
