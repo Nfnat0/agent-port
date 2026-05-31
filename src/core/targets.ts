@@ -54,7 +54,7 @@ export function getTargetCapabilities(
     case "cursor":
       return {
         instruction: {
-          path: path.join(context.cwd, ".cursor", "rules", "agent-port-generated.mdc"),
+          path: path.join(context.cwd, ".cursor", "rules", "agent-port-instructions.mdc"),
           mode: "cursor-rule",
         },
         mcp: {

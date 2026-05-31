@@ -99,7 +99,24 @@ export function assessMemoryRisk(memory: CanonicalMemory): RiskLevel {
 }
 
 export function hasBroadFilesystemPath(value: string): boolean {
-  return /(?:^|\s)(?:\/|~|\/Users\/[^/\s]+)(?:\s|$)/.test(value);
+  return value
+    .split(/[\s=:"',\[\]]+/)
+    .map((token) => token.replace(/^[ "'[,]+|[ "',\]]+$/g, ""))
+    .filter(Boolean)
+    .some((token) => {
+      if (token === "/" || token === "~" || token.startsWith("~/")) {
+        return true;
+      }
+      return (
+        /^\/Users\/[^/\s]+(?:\/|$)/.test(token) ||
+        /^\/home\/[^/\s]+(?:\/|$)/.test(token) ||
+        token === "/etc" ||
+        token.startsWith("/etc/") ||
+        token === "/root" ||
+        token.startsWith("/root/") ||
+        token === "/var/run/docker.sock"
+      );
+    });
 }
 
 export function isPermissionExpansion(

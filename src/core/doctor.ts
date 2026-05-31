@@ -20,7 +20,11 @@ export async function runDoctor(context: AdapterContext): Promise<DoctorItem[]> 
   for (const adapter of listAdapters()) {
     const setup = await adapter.read(context);
     if (setup.detected) {
-      items.push({ status: "ok", message: `${setup.displayName} config is readable` });
+      if (setup.warnings.some(isReadOrParseWarning)) {
+        items.push({ status: "warn", message: `${setup.displayName} config has errors` });
+      } else {
+        items.push({ status: "ok", message: `${setup.displayName} config is readable` });
+      }
     } else {
       items.push({ status: "warn", message: `${setup.displayName} config path not found` });
     }
@@ -43,6 +47,10 @@ export async function runDoctor(context: AdapterContext): Promise<DoctorItem[]> 
   }
 
   return items.length > 0 ? items : [{ status: "ok", message: "No setup files found" }];
+}
+
+function isReadOrParseWarning(warning: string): boolean {
+  return /^(Invalid JSON|Invalid TOML|Could not read)/.test(warning);
 }
 
 function inspectComponent(component: CanonicalSetupComponent): DoctorItem[] {

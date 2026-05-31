@@ -7,6 +7,7 @@ import type {
   CanonicalCommand,
   CanonicalCustomAgent,
   CanonicalHook,
+  CanonicalRule,
   CanonicalSkill,
 } from "../src/core/model.js";
 import { instruction, makeTempProject, mcpServer, permission, setup, testContext } from "./helpers.js";
@@ -86,7 +87,7 @@ describe("planner", () => {
       warnings: [],
       name: "pre-tool-use",
       event: "pre-tool-use",
-      command: "npm install",
+      command: "echo ghp_not-a-real-token-for-testing-1234567",
     };
 
     const changes = planChangesForTarget(
@@ -105,8 +106,124 @@ describe("planner", () => {
       expect.objectContaining({ type: "approximate", componentKind: "command" })
     );
     expect(changes).toContainEqual(
-      expect.objectContaining({ type: "manual-review", componentKind: "hook" })
+      expect.objectContaining({
+        type: "manual-review",
+        componentKind: "hook",
+        detail: "command: echo [REDACTED_SECRET]",
+      })
     );
+  });
+
+  it("uses the configured generated directory for approximate artifacts", async () => {
+    const context = testContext("/tmp/project", "/tmp/home");
+    context.generatedDir = "custom-generated";
+    const skill: CanonicalSkill = {
+      id: "skill:release-notes",
+      kind: "skill",
+      title: "release-notes",
+      source: { agent: "claude", path: ".claude/skills/release-notes/SKILL.md" },
+      portability: "approximate",
+      risk: "low",
+      warnings: [],
+      name: "release-notes",
+      description: "Write release notes.",
+      content: "Summarize merged changes.",
+      files: [".claude/skills/release-notes/SKILL.md"],
+    };
+
+    const changes = planChangesForTarget(
+      setup("claude", [skill]),
+      setup("gemini", []),
+      context
+    );
+    expect(changes).toContainEqual(
+      expect.objectContaining({
+        type: "approximate",
+        path: path.join("custom-generated", "gemini", "skills", "release-notes.md"),
+      })
+    );
+
+    const files = await generateFilesForTarget(
+      setup("claude", [skill]),
+      setup("gemini", []),
+      changes,
+      context
+    );
+    expect(files).toContainEqual(
+      expect.objectContaining({
+        path: path.join("custom-generated", "gemini", "skills", "release-notes.md"),
+      })
+    );
+  });
+
+  it("generates instruction artifacts for generated-only targets", async () => {
+    const context = testContext("/tmp/project", "/tmp/home");
+    const sourceInstruction = instruction("claude", "Use tests.");
+    const changes = planChangesForTarget(
+      setup("claude", [sourceInstruction]),
+      setup("antigravity", []),
+      context
+    );
+
+    expect(changes).toContainEqual(
+      expect.objectContaining({
+        type: "approximate",
+        componentKind: "instruction",
+        path: path.join(".agent-port", "generated", "antigravity", "instructions", "claude.md"),
+      })
+    );
+
+    const files = await generateFilesForTarget(
+      setup("claude", [sourceInstruction]),
+      setup("antigravity", []),
+      changes,
+      context
+    );
+    expect(files).toContainEqual(
+      expect.objectContaining({
+        path: path.join(".agent-port", "generated", "antigravity", "instructions", "claude.md"),
+        content: "Use tests.\n",
+      })
+    );
+  });
+
+  it("preserves Cursor rule scoping and writes separate generated rule files", async () => {
+    const context = testContext("/tmp/project", "/tmp/home");
+    const rules: CanonicalRule[] = [
+      {
+        id: "rule:one",
+        kind: "rule",
+        title: "Typescript",
+        source: { agent: "claude", path: ".cursor/rules/typescript.mdc" },
+        portability: "native",
+        risk: "low",
+        warnings: [],
+        content: "Use strict types.",
+        globs: ["src/**/*.ts"],
+        alwaysApply: false,
+      },
+      {
+        id: "rule:two",
+        kind: "rule",
+        title: "Tests",
+        source: { agent: "claude", path: ".cursor/rules/tests.mdc" },
+        portability: "native",
+        risk: "low",
+        warnings: [],
+        content: "Add focused tests.",
+      },
+    ];
+    const source = setup("claude", rules);
+    const target = setup("cursor", []);
+    const changes = planChangesForTarget(source, target, context);
+    const files = await generateFilesForTarget(source, target, changes, context);
+
+    expect(new Set(files.map((file) => file.path)).size).toBe(2);
+    expect(files.every((file) => file.path.startsWith(path.join(".cursor", "rules")))).toBe(true);
+    const scopedRule = files.find((file) => file.content.includes("Use strict types."));
+    expect(scopedRule?.content).toContain('globs: ["src/**/*.ts"]');
+    expect(scopedRule?.content).toContain("alwaysApply: false");
+    expect(scopedRule?.content).not.toContain("alwaysApply: true");
   });
 
   it("plans MCP add, skip, update, unsupported transport, and permission expansion", () => {

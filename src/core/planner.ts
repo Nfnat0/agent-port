@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "fs-extra";
 import { getAdapter } from "../adapters/index.js";
 import {
   type AdapterContext,
@@ -68,18 +69,15 @@ export async function applyPortPlan(
   const warnings: string[] = [];
 
   for (const file of plan.generatedFiles) {
+    const findings = scanUnknownForSecrets(file.content, file.path);
     let content = redactSecrets(file.content);
-    const findings = scanUnknownForSecrets(content, file.path);
     if (findings.length > 0) {
       warnings.push(
         `Redacted ${findings.length} secret-like value(s) before writing ${file.path}.`
       );
-      content = redactSecrets(content);
     }
 
-    const absolute = path.isAbsolute(file.path)
-      ? file.path
-      : path.join(context.cwd, file.path);
+    const absolute = await resolveWritablePlanPath(file.path, context.cwd);
     const result = await writeTextWithBackup(absolute, content);
     filesWritten.push(file.path);
     if (result.backup) {
@@ -88,4 +86,43 @@ export async function applyPortPlan(
   }
 
   return { filesWritten, backupsCreated, warnings };
+}
+
+async function resolveWritablePlanPath(filePath: string, cwd: string): Promise<string> {
+  const root = await fs.realpath(cwd);
+  const absolute = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(root, filePath);
+  const relative = path.relative(root, absolute);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Refusing to write outside the project: ${filePath}`);
+  }
+
+  if (await fs.pathExists(absolute)) {
+    const stat = await fs.lstat(absolute);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Refusing to write through symlink: ${filePath}`);
+    }
+  }
+
+  const parent = await nearestExistingParent(path.dirname(absolute));
+  const realParent = await fs.realpath(parent);
+  const parentRelative = path.relative(root, realParent);
+  if (parentRelative.startsWith("..") || path.isAbsolute(parentRelative)) {
+    throw new Error(`Refusing to write outside the project: ${filePath}`);
+  }
+
+  return absolute;
+}
+
+async function nearestExistingParent(directory: string): Promise<string> {
+  let current = path.resolve(directory);
+  while (!(await fs.pathExists(current))) {
+    const next = path.dirname(current);
+    if (next === current) {
+      return current;
+    }
+    current = next;
+  }
+  return current;
 }
